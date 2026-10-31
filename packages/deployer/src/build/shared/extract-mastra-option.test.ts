@@ -36,6 +36,24 @@ describe('Extract Mastra option', () => {
     }
   });
 
+  it('writes dynamic-import chunks split from the extracted config as .mjs', async () => {
+    const entryFile = join(_dirname, '../plugins/__fixtures__/basic-with-dynamic-import.js');
+    const result = await extractMastraOption('server', entryFile, testOutputDir);
+
+    expect(result).not.toBeNull();
+
+    const fileNames = result!.bundleOutput.output.map(output => output.fileName);
+    // The dynamic import must actually split out at least one extra chunk,
+    // otherwise this regression test would pass vacuously.
+    expect(fileNames.length).toBeGreaterThan(1);
+    // Every emitted file must be .mjs so Node loads it as ESM regardless of the
+    // project's package.json "type" field or a loader such as tsx. Before the
+    // fix the split chunks defaulted to Rollup's `[name]-[hash].js`.
+    for (const fileName of fileNames) {
+      expect(fileName, `expected ${fileName} to be a .mjs file`).toMatch(/\.mjs$/);
+    }
+  });
+
   describe.each([['bundler'], ['deployer'], ['server']] as const)('%s', name => {
     it.for([
       ['../plugins/__fixtures__/basic.js'],

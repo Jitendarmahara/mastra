@@ -130,6 +130,12 @@ export async function extractMastraOption<T extends keyof MastraConfig>(
     dir: outputDir,
     format: 'es',
     entryFileNames: '[name].mjs',
+    // Without this, a dynamic import in the extracted config's graph splits a
+    // chunk that Rollup names `[name]-[hash].js`. In a project whose package.json
+    // has no `"type": "module"`, Node loads that `.js` chunk as CommonJS, so the
+    // config fails to load under a loader such as tsx. Match the entry and every
+    // other deployer bundle by writing chunks as `.mjs`.
+    chunkFileNames: '[name].mjs',
   });
 
   if (result.hasCustomConfig) {

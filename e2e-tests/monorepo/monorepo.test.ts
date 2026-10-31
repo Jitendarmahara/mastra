@@ -430,11 +430,11 @@ await assert.rejects(new DepsService(${JSON.stringify(missingProject)}).getProje
         const mastraIndex = originalMastraIndex
           .replace(
             "import { testRoute } from '@/api/route/test';",
-            "import { testRoute } from '@/api/route/test';\nimport { environmentRoute } from '@/api/route/environment';\nimport { versionlessRoute } from '@/api/route/versionless';\nimport { rawTsRoute } from '@/api/route/raw-ts';",
+            "import { testRoute } from '@/api/route/test';\nimport { environmentRoute } from '@/api/route/environment';\nimport { versionlessRoute } from '@/api/route/versionless';\nimport { rawTsRoute } from '@/api/route/raw-ts';\nimport { dynamicImportRoute } from '@/api/route/dynamic-import';",
           )
           .replace(
             /apiRoutes: \[\s*testRoute,/,
-            'apiRoutes: [testRoute, environmentRoute, versionlessRoute, rawTsRoute,',
+            'apiRoutes: [testRoute, environmentRoute, versionlessRoute, rawTsRoute, dynamicImportRoute,',
           );
         await Promise.all([
           writeFile(mastraIndexPath, mastraIndex),
@@ -554,6 +554,34 @@ export const environmentRoute = registerApiRoute('/environment', {
       const res = await fetch(`http://localhost:${port}/raw-ts`);
       expect(res.status).toBe(200);
       await expect(res.json()).resolves.toEqual({ value: 'hello workspace c' });
+    });
+
+    it('writes chunks split from the server config as .mjs so they load under a loader (#28491)', async () => {
+      // The route handler dynamically imports a local module, which splits a
+      // chunk out of the extracted server config.
+      const res = await fetch(`http://localhost:${port}/dynamic-import`);
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toEqual({ shared: 'shared-dynamic', lazy: 'shared-dynamic-lazy' });
+
+      const outputDir = join(fixturePath, 'apps', 'custom', '.mastra', 'output');
+      const outputFiles = await readdir(outputDir);
+      const serverConfig = await readFile(join(outputDir, 'server-config.mjs'), 'utf-8');
+      const relativeImports = [...serverConfig.matchAll(/['"]\.\/([^'"]+)['"]/g)].map(match => match[1]!);
+
+      // Before the fix the split chunk was named `[name]-[hash].js`, which Node
+      // loads as CommonJS when the project's package.json has no "type": "module"
+      // (and fails outright under a loader such as tsx). Every chunk the server
+      // config imports must be a sibling `.mjs` file.
+      const jsChunkImports = relativeImports.filter(ref => ref.endsWith('.js'));
+      expect(jsChunkImports).toEqual([]);
+
+      // Guard against a vacuous pass: a chunk really must have split out, and it
+      // must exist on disk under its `.mjs` name.
+      const mjsChunkImports = relativeImports.filter(ref => ref.endsWith('.mjs'));
+      expect(mjsChunkImports.length).toBeGreaterThan(0);
+      for (const chunk of mjsChunkImports) {
+        expect(outputFiles, `expected chunk ${chunk} on disk`).toContain(chunk);
+      }
     });
 
     it('layers development dotenv files without overriding the shell environment', async () => {
